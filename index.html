@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game AR Makan Makanan Jatuh</title>
+
+    <!-- Pustaka MediaPipe untuk Deteksi Wajah -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;700&display=swap');
+
+        :root {
+            --primary: #FF6B6B;
+            --secondary: #4ECDC4;
+            --dark: #292F36;
+            --light: #F7FFF7;
+            --warning: #FFE66D;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--dark);
+            color: var(--light);
+            font-family: 'Nunito', sans-serif;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        /* Container Utama */
+        #game-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            height: 100vh;
+            max-height: 800px;
+            background: #000;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        /* Elemen Video & Canvas */
+        video {
+            display: none; /* Sembunyikan video asli, kita gambar di canvas */
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+
+        /* Layar UI (Menu, Game Over, dll) */
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(41, 47, 54, 0.9);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+            transition: opacity 0.3s;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        h1, h2 {
+            font-family: 'Fredoka One', cursive;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+            color: var(--warning);
+        }
+
+        h1 { font-size: 2.5rem; text-shadow: 3px 3px 0px var(--primary); }
+
+        p {
+            font-size: 1.1rem;
+            max-width: 500px;
+            line-height: 1.5;
+            margin-bottom: 20px;
+        }
+
+        .instruction-box {
+            background: rgba(255,255,255,0.1);
+            padding: 15px 25px;
+            border-radius: 15px;
+            border: 2px dashed var(--secondary);
+            margin-bottom: 25px;
+        }
+
+        input[type="text"] {
+            padding: 12px 20px;
+            font-size: 1.2rem;
+            border: none;
+            border-radius: 25px;
+            outline: none;
+            width: 80%;
+            max-width: 300px;
+            text-align: center;
+            margin-bottom: 20px;
+            font-family: 'Fredoka One', cursive;
+            color: var(--dark);
+        }
+
+        button {
+            padding: 15px 30px;
+            font-size: 1.2rem;
+            font-family: 'Fredoka One', cursive;
+            border: none;
+            border-radius: 30px;
+            background-color: var(--primary);
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 5px 0px #C93838;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        button:active {
+            transform: translateY(5px);
+            box-shadow: 0 0px 0px #C93838;
+        }
+
+        button:disabled {
+            background-color: #777;
+            box-shadow: 0 5px 0px #444;
+            cursor: not-allowed;
+        }
+
+        /* Heads Up Display (HUD) */
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            z-index: 5;
+            font-family: 'Fredoka One', cursive;
+            font-size: 1.5rem;
+            text-shadow: 2px 2px 0px #000;
+        }
+
+        .hud-box {
+            background: rgba(0,0,0,0.4);
+            padding: 10px 20px;
+            border-radius: 20px;
+            border: 2px solid rgba(255,255,255,0.2);
+        }
+
+        /* Leaderboard Table */
+        table {
+            width: 100%;
+            max-width: 400px;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        th { background: var(--secondary); color: var(--dark); }
+        tr:nth-child(1) td { color: #FFD700; font-weight: bold; } /* Gold */
+        tr:nth-child(2) td { color: #C0C0C0; font-weight: bold; } /* Silver */
+        tr:nth-child(3) td { color: #CD7F32; font-weight: bold; } /* Bronze */
+
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        
+        <!-- Video & Canvas API -->
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="game-canvas"></canvas>
+
+        <!-- HUD (Score & Waktu) -->
+        <div id="hud" class="hidden">
+            <div class="hud-box">Skor: <span id="score-display">0</span></div>
+            <div class="hud-box" style="color: var(--warning);">⏳ <span id="time-display">60</span>s</div>
+        </div>
+
+        <!-- LAYAR 1: Menu Awal -->
+        <div id="start-screen" class="screen">
+            <h1>Game AR: Hap!</h1>
+            <div class="instruction-box">
+                <p>🍕 <b>Makan Makanan:</b> +10 Poin<br>
+                   💣 <b>Makan Sampah/Bom:</b> -15 Poin</p>
+                <p style="font-size: 0.95rem; color: #aaa; margin-bottom: 0;">
+                   <b>Cara Main:</b> Biarkan makanan jatuh melewati mulutmu. <b>Buka mulutmu</b> untuk bersiap, lalu <b>Tutup Mulutmu</b> saat objek berada tepat di bibir untuk memakannya!
+                </p>
+            </div>
+            
+            <input type="text" id="player-name" placeholder="Masukkan Namamu" autocomplete="off" maxlength="15">
+            
+            <button id="btn-init-camera">Aktifkan Kamera & AI</button>
+            <p id="loading-status" style="margin-top: 15px; font-size: 0.9rem; color: var(--warning); display: none;">
+                Sedang memuat model AI (Tunggu sebentar)...
+            </p>
+        </div>
+
+        <!-- LAYAR 2: Leaderboard & Game Over -->
+        <div id="end-screen" class="screen hidden">
+            <h1>Waktu Habis!</h1>
+            <h2>Skor Akhir: <span id="final-score">0</span></h2>
+            <p id="sync-status">Menyimpan skor ke database...</p>
+            
+            <table id="leaderboard-table">
+                <thead>
+                    <tr>
+                        <th>Peringkat</th>
+                        <th>Nama Pemain</th>
+                        <th>Skor</th>
+                    </tr>
+                </thead>
+                <tbody id="leaderboard-body">
+                    <!-- Data Leaderboard akan dimuat di sini -->
+                </tbody>
+            </table>
+
+            <button onclick="location.reload()">Main Lagi</button>
+        </div>
+
+    </div>
+
+    <!-- ==========================================
+         KODE GOOGLE APPS SCRIPT (UNTUK SPREADSHEET)
+         ==========================================
+         Cara Pengaturan Backend Spreadsheet:
+         1. Buat Google Sheets baru. Beri nama Sheet pertama "Skor".
+         2. Di sel A1 ketik "Nama", B1 ketik "Skor".
+         3. Klik Ekstensi > Apps Script.
+         4. Salin dan tempel kode berikut ke editor Apps Script:
+
+            function doPost(e) {
+              var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Skor");
+              var data = JSON.parse(e.postData.contents);
+              
+              // Simpan data baru
+              sheet.appendRow([data.nama, data.skor]);
+              
+              // Ambil semua data untuk leaderboard
+              var range = sheet.getDataRange();
+              var values = range.getValues();
+              values.shift(); // Hapus header
+              
+              // Urutkan berdasarkan skor tertinggi (kolom indeks 1)
+              values.sort(function(a, b) { return b[1] - a[1]; });
+              
+              // Ambil top 5
+              var top5 = values.slice(0, 5).map(function(row) {
+                return { nama: row[0], skor: row[1] };
+              });
+              
+              return ContentService.createTextOutput(JSON.stringify({ status: 'success', leaderboard: top5 }))
+                .setMimeType(ContentService.MimeType.JSON);
+            }
+
+         5. Klik Terapkan (Deploy) > Penerapan Baru > Pilih jenis "Aplikasi Web".
+         6. Akses: "Siapa saja". Lalu Salin "URL Aplikasi Web" yang dihasilkan.
+         7. Tempel URL tersebut pada variabel SCRIPT_URL di bawah ini.
+    =========================================== -->
+
+    <script>
+        // --- KONFIGURASI ---
+        // GANTI URL DI BAWAH INI DENGAN URL WEB APP GOOGLE SCRIPT ANDA
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxQ9bwMSf4t1yVZIeVm-iti2JlqSjncnfIIKe6yknm1730cn-EAnmjSZqH9RtP6gQoCJQ/exec';
+        
+        const GAME_DURATION = 60; // Detik
+
+        // --- Variabel Game ---
+        let playerName = "Anonim";
+        let score = 0;
+        let timeLeft = GAME_DURATION;
+        let gameActive = false;
+        let items = [];
+        let floatingTexts = [];
+        let mouthWasOpen = false;
+        
+        // --- Sistem Suara (Web Audio API) ---
+        // Menghasilkan suara sintesis tanpa butuh file .mp3 eksternal
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            const now = audioCtx.currentTime;
+            
+            if (type === 'eatGood') {
+                // Suara melengking (Ting!)
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(600, now);
+                oscillator.frequency.exponentialRampToValueAtTime(1200, now + 0.15);
+                gainNode.gain.setValueAtTime(0.5, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                oscillator.start(now);
+                oscillator.stop(now + 0.15);
+            } else if (type === 'eatBad') {
+                // Suara rendah (Bzzz!)
+                oscillator.type = 'sawtooth';
+                oscillator.frequency.setValueAtTime(250, now);
+                oscillator.frequency.exponentialRampToValueAtTime(100, now + 0.3);
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                oscillator.start(now);
+                oscillator.stop(now + 0.3);
+            } else if (type === 'gameOver') {
+                // Suara dramatis menurun (Wawawa)
+                oscillator.type = 'triangle';
+                oscillator.frequency.setValueAtTime(400, now);
+                oscillator.frequency.exponentialRampToValueAtTime(50, now + 1.0);
+                gainNode.gain.setValueAtTime(0.5, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.0);
+                oscillator.start(now);
+                oscillator.stop(now + 1.0);
+            }
+        }
+
+        // --- Referensi DOM ---
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('game-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const startScreen = document.getElementById('start-screen');
+        const endScreen = document.getElementById('end-screen');
+        const hud = document.getElementById('hud');
+        const scoreDisplay = document.getElementById('score-display');
+        const timeDisplay = document.getElementById('time-display');
+        const nameInput = document.getElementById('player-name');
+        const btnInit = document.getElementById('btn-init-camera');
+        const loadingStatus = document.getElementById('loading-status');
+
+        // --- Aset Emoji ---
+        const goodFoods = ['🍕', '🍔', '🍟', '🌭', '🍿', '🍩', '🍪', '🍫', '🍓', '🍉', '🍗', '🌮'];
+        const badFoods = ['💣', '🕷️', '💩', '🪨', '🌶️'];
+
+        // Resize Canvas menyesuaikan kontainer
+        function resizeCanvas() {
+            canvasElement.width = canvasElement.clientWidth;
+            canvasElement.height = canvasElement.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- Sistem Partikel Teks Melayang (Floating Text) ---
+        class FloatingText {
+            constructor(x, y, text, color) {
+                this.x = x;
+                this.y = y;
+                this.text = text;
+                this.color = color;
+                this.alpha = 1.0;
+                this.velocity = -2; // Bergerak ke atas
+            }
+            update() {
+                this.y += this.velocity;
+                this.alpha -= 0.02; // Memudar
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.font = "bold 24px 'Fredoka One'";
+                ctx.fillStyle = this.color;
+                ctx.strokeStyle = "white";
+                ctx.lineWidth = 3;
+                ctx.strokeText(this.text, this.x, this.y);
+                ctx.fillText(this.text, this.x, this.y);
+                ctx.restore();
+            }
+        }
+
+        // --- Logika Game ---
+        function spawnItem() {
+            if (!gameActive) return;
+            
+            // Peluang 75% makanan enak, 25% makanan buruk (sampah)
+            const isGood = Math.random() > 0.25;
+            const emojiArr = isGood ? goodFoods : badFoods;
+            const emoji = emojiArr[Math.floor(Math.random() * emojiArr.length)];
+            
+            // X relatif dari 0.1 s.d 0.9 agar tidak keluar dari batas layar
+            const x = 0.1 + (Math.random() * 0.8);
+            // Kecepatan bervariasi
+            const speed = 0.005 + (Math.random() * 0.008); 
+
+            items.push({
+                id: Date.now(),
+                emoji: emoji,
+                isGood: isGood,
+                x: x,
+                y: -0.1, // Mulai dari luar layar atas
+                speed: speed,
+                targeted: false // Penanda jika item ini ada di depan mulut terbuka
+            });
+        }
+
+        function updateGame() {
+            if (!gameActive) return;
+
+            // Pindahkan posisi item
+            for (let i = items.length - 1; i >= 0; i--) {
+                items[i].y += items[i].speed;
+
+                // Hapus item yang jatuh melewati layar bawah
+                if (items[i].y > 1.1) {
+                    items.splice(i, 1);
+                }
+            }
+
+            // Update teks mengambang
+            for (let i = floatingTexts.length - 1; i >= 0; i--) {
+                floatingTexts[i].update();
+                if (floatingTexts[i].alpha <= 0) {
+                    floatingTexts.splice(i, 1);
+                }
+            }
+        }
+
+        function eatItem(index, mouthX, mouthY) {
+            const item = items[index];
+            let pointChange = 0;
+            let color = "";
+            let text = "";
+
+            if (item.isGood) {
+                pointChange = 10;
+                color = "#4ECDC4"; // Hijau tosca
+                text = "+10";
+                playSound('eatGood'); // Mainkan suara enak
+            } else {
+                pointChange = -15;
+                color = "#FF6B6B"; // Merah
+                text = "-15";
+                playSound('eatBad'); // Mainkan suara buruk
+            }
+
+            score += pointChange;
+            scoreDisplay.innerText = score;
+
+            // Animasi teks di posisi item dimakan
+            floatingTexts.push(new FloatingText(mouthX, mouthY - 30, text, color));
+
+            // Hapus dari array
+            items.splice(index, 1);
+        }
+
+        function endGame() {
+            gameActive = false;
+            hud.classList.add('hidden');
+            endScreen.classList.remove('hidden');
+            document.getElementById('final-score').innerText = score;
+            
+            playSound('gameOver'); // Mainkan suara Game Over
+            submitScoreToGAS(playerName, score);
+        }
+
+        // --- Timer Game ---
+        function startTimer() {
+            const timerInterval = setInterval(() => {
+                if (!gameActive) {
+                    clearInterval(timerInterval);
+                    return;
+                }
+                timeLeft--;
+                timeDisplay.innerText = timeLeft;
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    endGame();
+                }
+            }, 1000);
+
+            // Spawn item secara berkala (Setiap 600ms - 1200ms)
+            function spawner() {
+                if (!gameActive) return;
+                spawnItem();
+                setTimeout(spawner, 600 + Math.random() * 600);
+            }
+            spawner();
+        }
+
+        // --- Integrasi Leaderboard via Fetch ---
+        async function submitScoreToGAS(name, finalScore) {
+            const syncStatus = document.getElementById('sync-status');
+            const tbody = document.getElementById('leaderboard-body');
+            
+            try {
+                // Konfigurasi fetch ke Google Web App
+                const response = await fetch(SCRIPT_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'text/plain;charset=utf-8', 
+                        // Menggunakan text/plain menghindari pengecekan preflight CORS yang ketat di Apps Script
+                    },
+                    body: JSON.stringify({ nama: name, skor: finalScore })
+                });
+
+                const data = await response.json();
+                
+                if (data && data.leaderboard) {
+                    syncStatus.innerText = "Data berhasil disimpan!";
+                    syncStatus.style.color = "var(--secondary)";
+                    renderLeaderboard(data.leaderboard);
+                } else {
+                    throw new Error("Format respons tidak sesuai");
+                }
+            } catch (error) {
+                console.error('Error menyimpan data:', error);
+                syncStatus.innerText = "Gagal terhubung ke database. (Tampilkan Skor Lokal)";
+                syncStatus.style.color = "var(--primary)";
+                
+                // Fallback (Menampilkan data palsu jika SCRIPT_URL belum dikonfigurasi / Error)
+                renderLeaderboard([
+                    {nama: name, skor: finalScore},
+                    {nama: "Pemain Jago", skor: 150},
+                    {nama: "Si Cepat", skor: 80},
+                    {nama: "Tester", skor: 20}
+                ].sort((a,b) => b.skor - a.skor));
+            }
+        }
+
+        function renderLeaderboard(boardData) {
+            const tbody = document.getElementById('leaderboard-body');
+            tbody.innerHTML = '';
+            
+            boardData.forEach((player, index) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>#${index + 1}</td>
+                    <td>${player.nama}</td>
+                    <td>${player.skor}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // --- MediaPipe Face Mesh Initialization ---
+        const faceMesh = new FaceMesh({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+        }});
+        
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        // Loop utama Computer Vision dan Rendering
+        faceMesh.onResults((results) => {
+            
+            // Ubah tombol "Aktifkan" menjadi "Mulai" ketika frame AI pertama berhasil terproses
+            if (!gameActive && startScreen.classList.contains('hidden') === false) {
+                if (btnInit.disabled) {
+                    loadingStatus.style.display = 'none';
+                    btnInit.innerText = "Mulai Permainan!";
+                    btnInit.disabled = false;
+                    btnInit.onclick = () => {
+                        // Bypass blokir audio browser saat ada interaksi klik dari pengguna
+                        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+                        playerName = nameInput.value.trim() || "Anonim";
+                        startScreen.classList.add('hidden');
+                        hud.classList.remove('hidden');
+                        gameActive = true;
+                        startTimer();
+                    };
+                }
+            }
+
+            const w = canvasElement.width;
+            const h = canvasElement.height;
+
+            // Bersihkan kanvas
+            canvasCtx.clearRect(0, 0, w, h);
+
+            // 1. Gambar Feed Kamera (Di-Mirror/Dibalik agar seperti cermin)
+            canvasCtx.save();
+            canvasCtx.translate(w, 0);
+            canvasCtx.scale(-1, 1);
+            canvasCtx.drawImage(results.image, 0, 0, w, h);
+            canvasCtx.restore();
+
+            // Overlay gelap agar game lebih kontras
+            canvasCtx.fillStyle = 'rgba(0,0,0,0.3)';
+            canvasCtx.fillRect(0,0,w,h);
+
+            let mouthX = 0, mouthY = 0;
+            let isMouthOpen = false;
+
+            // 2. Analisis Landamark Wajah
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+
+                // Indeks MediaPipe Face Mesh untuk mulut:
+                // Bibir atas dalam: 13, Bibir bawah dalam: 14
+                // Sudut mulut kiri: 61, Sudut mulut kanan: 291
+                const topLip = landmarks[13];
+                const bottomLip = landmarks[14];
+                const leftMouth = landmarks[61];
+                const rightMouth = landmarks[291];
+
+                // Hitung koordinat pusat mulut di layar
+                // PENTING: Karena video di-mirror, koordinat X landmark juga harus di-mirror (1 - x)
+                mouthX = (1 - ((topLip.x + bottomLip.x) / 2)) * w;
+                mouthY = ((topLip.y + bottomLip.y) / 2) * h;
+
+                // Hitung keterbukaan mulut (Rasio tinggi vertikal bibir dibagi lebar horizontal bibir)
+                const mouthHeight = Math.hypot(bottomLip.x - topLip.x, bottomLip.y - topLip.y);
+                const mouthWidth = Math.hypot(rightMouth.x - leftMouth.x, rightMouth.y - leftMouth.y);
+                const opennessRatio = mouthHeight / mouthWidth;
+
+                // Ambang batas mulut terbuka (biasanya rasio > 0.15 sudah cukup lebar)
+                isMouthOpen = opennessRatio > 0.15;
+
+                // Gambar Indikator Mulut di Layar
+                canvasCtx.beginPath();
+                canvasCtx.arc(mouthX, mouthY, 40, 0, 2 * Math.PI);
+                canvasCtx.lineWidth = 4;
+                if (isMouthOpen) {
+                    canvasCtx.strokeStyle = '#4ECDC4'; // Hijau (Siap Makan)
+                    canvasCtx.fillStyle = 'rgba(78, 205, 196, 0.2)';
+                } else {
+                    canvasCtx.strokeStyle = '#FFE66D'; // Kuning (Menutup)
+                    canvasCtx.fillStyle = 'rgba(255, 230, 109, 0.2)';
+                }
+                canvasCtx.stroke();
+                canvasCtx.fill();
+            }
+
+            // 3. Logika Memakan (Game Logic)
+            if (gameActive) {
+                updateGame();
+
+                for (let i = items.length - 1; i >= 0; i--) {
+                    const item = items[i];
+                    // Konversi koordinat relatif ke piksel
+                    const itemPixelX = item.x * w;
+                    const itemPixelY = item.y * h;
+
+                    // Gambar Item Emoji
+                    canvasCtx.globalAlpha = 1.0;     // Pastikan opacity 100% penuh
+                    canvasCtx.fillStyle = "#FFFFFF"; // Reset fillStyle agar emoji tidak tertular efek transparan
+                    canvasCtx.font = "40px Arial";
+                    canvasCtx.textAlign = "center";
+                    canvasCtx.textBaseline = "middle";
+                    canvasCtx.fillText(item.emoji, itemPixelX, itemPixelY);
+
+                    // Deteksi Kolisi (Hitbox)
+                    const dist = Math.hypot(itemPixelX - mouthX, itemPixelY - mouthY);
+                    const collisionRadius = 50; // Jarak toleransi mulut
+
+                    if (dist < collisionRadius) {
+                        // Jika berada di dekat mulut, beri tanda
+                        item.targeted = true;
+                        
+                        // Gambar efek bercahaya pada item yang siap dimakan
+                        canvasCtx.beginPath();
+                        canvasCtx.arc(itemPixelX, itemPixelY, 30, 0, 2 * Math.PI);
+                        canvasCtx.strokeStyle = 'white';
+                        canvasCtx.lineWidth = 2;
+                        canvasCtx.setLineDash([5, 5]);
+                        canvasCtx.stroke();
+                        canvasCtx.setLineDash([]);
+                    } else {
+                        item.targeted = false;
+                    }
+
+                    // GESTUR MEMAKAN: Mulut "TUTUP" setelah sebelumnya "BUKA" saat objek tertarget
+                    if (item.targeted && mouthWasOpen && !isMouthOpen) {
+                        eatItem(i, mouthX, mouthY);
+                    }
+                }
+
+                // Render Partikel Teks
+                floatingTexts.forEach(ft => ft.draw(canvasCtx));
+            }
+
+            // Simpan status mulut untuk frame berikutnya
+            mouthWasOpen = isMouthOpen;
+        });
+
+        // --- Inisialisasi Kamera ---
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await faceMesh.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+
+        // Event Tombol: Minta Akses Kamera & Load AI
+        btnInit.addEventListener('click', () => {
+            if (nameInput.value.trim() === "") {
+                alert("Harap masukkan nama Anda terlebih dahulu!");
+                return;
+            }
+            
+            // Ubah UI menjadi Loading
+            btnInit.innerText = "Meminta Izin Kamera...";
+            btnInit.disabled = true;
+            loadingStatus.style.display = 'block';
+
+            camera.start()
+                .then(() => {
+                    // Kamera menyala, tunggu `faceMesh.onResults` terpanggil untuk mengubah tombol
+                    console.log("Kamera Berhasil Aktif");
+                })
+                .catch((err) => {
+                    console.error(err);
+                    alert("Kamera tidak dapat diakses! Pastikan Anda memberikan izin kamera.");
+                    btnInit.innerText = "Coba Lagi";
+                    btnInit.disabled = false;
+                    loadingStatus.style.display = 'none';
+                });
+        });
+
+    </script>
+</body>
+</html>
